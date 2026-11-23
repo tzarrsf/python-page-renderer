@@ -25,8 +25,19 @@ def get_credentials():
         )
     return Credentials.from_service_account_file(str(creds_path), scopes=SCOPES)
 
-def render_page(url):
-    """Render a page using Playwright and return the HTML."""
+def render_page(url, extract_type=None):
+    """Render a page using Playwright and extract relevant content.
+
+    Args:
+        url: The URL to render
+        extract_type: Optional extraction type. If None, returns full HTML.
+                     'title-metadata' returns only title-related HTML sections
+                     Custom regex pattern can also be passed
+
+    Returns:
+        Extracted content based on extract_type, or full HTML if extract_type is None
+    """
+    import re
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -35,11 +46,47 @@ def render_page(url):
                 page.goto(url, wait_until='networkidle')
                 html = page.content()
                 browser.close()
-                return {
-                    "html": html,
-                    "url": url,
-                    "status": "success"
-                }
+
+                # If no extraction type specified, return full HTML
+                if not extract_type:
+                    return html
+
+                # Extract title-related metadata only (for Salesforce Help articles, etc.)
+                if extract_type == 'title-metadata':
+                    result_parts = []
+
+                    # Extract <title> tag
+                    title_match = re.search(r'<title\b[^>]*>[\s\S]*?</title\s*>', html, re.IGNORECASE)
+                    if title_match:
+                        result_parts.append(title_match.group(0))
+
+                    # Extract og:title meta tag
+                    og_match = re.search(r'<meta\s+property="og:title"[^>]*>', html, re.IGNORECASE)
+                    if og_match:
+                        result_parts.append(og_match.group(0))
+
+                    # Extract h1.article-title
+                    h1_match = re.search(r'<h1\b[^>]*class="[^"]*article-title[^"]*"[^>]*>[\s\S]*?</h1\s*>', html, re.IGNORECASE)
+                    if h1_match:
+                        result_parts.append(h1_match.group(0))
+
+                    # Extract JSON-LD blocks
+                    ld_matches = re.finditer(r'<script\s+type="application/ld\+json"[^>]*>[\s\S]*?</script\s*>', html, re.IGNORECASE)
+                    for match in ld_matches:
+                        result_parts.append(match.group(0))
+
+                    return '\n'.join(result_parts)
+
+                # Try to use extract_type as regex pattern
+                try:
+                    match = re.search(extract_type, html, re.DOTALL)
+                    if match:
+                        return match.group(0) if match.groups() == () else match.group(1)
+                except re.error:
+                    # If regex fails, return full HTML
+                    return html
+
+                return ""
             except Exception as e:
                 browser.close()
                 raise Exception(f"Failed to render page: {str(e)}")
@@ -77,16 +124,17 @@ def main(sheet_id):
             for i, r in enumerate(rows[1:], start=2):  # Skip header row
                 if len(r) > 1 and r[1] == "pending":
                     job_id = r[0]
-                    payload = json.loads(r[2])
+                    payload_str = r[2] if len(r) > 2 else ""
+                    extract_type = r[3] if len(r) > 3 else None
 
-                    print(f"Processing job {job_id}: {payload}")
+                    print(f"Processing job {job_id}: URL={payload_str}, extract_type={extract_type}")
                     sh.update_cell(i, 2, "running")
 
                     try:
-                        result = render_page(payload.get("url", ""))
+                        result = render_page(payload_str, extract_type)
                         sh.update(f"B{i}:E{i}", [[
                             "done",
-                            json.dumps(result),
+                            result,
                             "",
                             time.strftime("%Y-%m-%d %H:%M:%S")
                         ]])

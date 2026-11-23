@@ -1,6 +1,10 @@
 # Python Page Renderer
 
-A simple Flask service that uses Playwright to fetch and render HTML from URLs, exposing a REST endpoint for external clients that can call into localhost, or alternatively by using a job queue. The design is a simple one-string-in, one-string-out approach. A URL is provided and the rendered HTML is sent back.
+A simple service that uses Playwright to fetch and render HTML from URLs, with two modes of operation:
+- **Proxy Mode** — HTTP service on localhost:3000 for direct page rendering requests
+- **Worker Mode** — Background worker that polls a Google Sheet for rendering jobs and processes them asynchronously
+
+The worker is designed to be memory-efficient: it stores only URLs in the payload column and extracted content (not full HTML) in the result column, keeping all entries well under the 50,000 character limit.
 
 ## Python Version
 
@@ -286,11 +290,20 @@ This service communicates with Google Apps Script via a Google Sheet job queue. 
 2. Create a new spreadsheet
 3. Add a tab named `Jobs`
 4. In the `Jobs` tab, add a header row with these columns:
-   - Column A: `id`
-   - Column B: `status`
-   - Column C: `payload`
-   - Column D: `result`
-   - Column E: `timestamp`
+   - Column A: `id` — Unique job identifier
+   - Column B: `status` — Job status (pending, running, done, error)
+   - Column C: `payload` — The URL to render
+   - Column D: `extract_type` — Optional extraction type (see below)
+   - Column E: `result` — The extracted result (never the full HTML)
+   - Column F: `timestamp` — When the job was processed
+
+**Extract Types (Column D):**
+- Leave empty or omit: Returns full rendered HTML
+- `title-metadata`: Extracts only title-related HTML snippets (title tag, meta tags, article-title h1, JSON-LD) — useful for title extraction
+- Custom regex pattern: Returns content matching the regex
+
+**Important:** Always keep results under 50,000 characters. Use extraction types to avoid storing full HTML.
+
 5. Keep the Sheet open for now (don't share yet)
 
 ### Step 2: Set Up Google Cloud Project & Create Service Account
@@ -354,7 +367,7 @@ This service communicates with Google Apps Script via a Google Sheet job queue. 
 
 Before running the worker, verify:
 - [ ] `gspread_service_account.json` exists in the project root
-- [ ] The Google Sheet has a "Jobs" tab with headers: id, status, payload, result, timestamp
+- [ ] The Google Sheet has a "Jobs" tab with headers: id, status, payload, extract_type, result, timestamp
 - [ ] The Sheet is shared with the service account email
 - [ ] You have the Sheet ID (the long string between `/d/` and `/edit` in the URL)
 
@@ -379,12 +392,29 @@ Replace `YOUR_SHEET_ID` with the ID from your Sheet URL.
 .venv\Scripts\python worker.py 1H-a6BGoKKrwUi5stro7pusYa9SrqziTEAvOZFsR4y5g
 ```
 
-**On first run:**
-- The worker will read `gspread_service_account.json` and authenticate with Google
-- It will verify the Sheet is accessible
-- It will start polling the Sheet for jobs with status "pending"
-- Each pending job will be processed and results updated in the Sheet
+**Job Processing:**
+- The worker polls the Sheet every 5 seconds for rows with status "pending"
+- For each pending job:
+  1. Reads the URL from column C (payload)
+  2. Reads the extraction type from column D (extract_type)
+  3. Renders the page using Playwright
+  4. Extracts content based on the extraction type (or returns full HTML if extract_type is empty)
+  5. Writes the result to column E
+  6. Updates status to "done" or "error" in column B
+  7. Records the timestamp in column F
 - Press `Ctrl+C` to stop the worker at any time
+
+**Examples:**
+
+Adding a job to extract title metadata from a Salesforce Help article:
+| id | status | payload | extract_type | result | timestamp |
+|-|-|-|-|-|-|
+| abc-123 | pending | https://help.salesforce.com/s/articleView?id=005388918&type=1 | title-metadata | | |
+
+Adding a job with custom regex to extract prices:
+| id | status | payload | extract_type | result | timestamp |
+|-|-|-|-|-|-|
+| xyz-789 | pending | https://example.com/product | price:\s*[\$]?([\d,]+\.?\d*) | | |
 
 ### Error Handling
 
