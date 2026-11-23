@@ -38,7 +38,7 @@ set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 
 :: --- Install ---
 call :step "Upgrading pip..."
-"%VENV_PY%" -m pip install --upgrade pip
+"%VENV_PY%" -m pip install --upgrade pip wheel setuptools
 if errorlevel 1 goto :fail
 
 call :step "Installing requirements..."
@@ -53,8 +53,11 @@ if errorlevel 1 goto :fail
 call :success "Installation complete."
 echo.
 
-call :info "To run the service:" Cyan
-echo     %VENV_PY% main.py
+call :info "Virtual environment created in: %VENV_DIR%" Cyan
+call :info "To use the venv, run:" Cyan
+echo     %VENV_DIR%\Scripts\python main.py
+echo     or
+echo     %VENV_DIR%\Scripts\python worker.py SHEET_ID
 echo.
 
 goto :end

@@ -35,8 +35,8 @@ try {
 
     $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
-    Step "Upgrading pip..."
-    & $VenvPython -m pip install --upgrade pip
+    Step "Upgrading pip, wheel, and setuptools..."
+    & $VenvPython -m pip install --upgrade pip wheel setuptools
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to upgrade pip."
     }
@@ -55,8 +55,11 @@ try {
 
     Success "Installation complete."
     Write-Host ""
-    Info "To run the service:"
+    Info "Virtual environment created in: $VenvDir"
+    Info "To use the venv, run:"
     Write-Host "    .\$VenvDir\Scripts\python.exe main.py" -ForegroundColor Yellow
+    Write-Host "    or" -ForegroundColor Gray
+    Write-Host "    .\$VenvDir\Scripts\python.exe worker.py SHEET_ID" -ForegroundColor Yellow
     Write-Host ""
 }
 catch {

@@ -31,8 +31,8 @@ fi
 
 VENV_PY="$VENV_DIR/bin/python"
 
-echo "[>] Upgrading pip..."
-"$VENV_PY" -m pip install --upgrade pip
+echo "[>] Upgrading pip, wheel, and setuptools..."
+"$VENV_PY" -m pip install --upgrade pip wheel setuptools
 if [ $? -ne 0 ]; then
     echo "[x] Failed to upgrade pip."
     echo ""
@@ -57,6 +57,9 @@ fi
 
 echo "[+] Installation complete."
 echo ""
-echo "[i] To run the service:"
+echo "[i] Virtual environment created in: $VENV_DIR"
+echo "[i] To use the venv, run:"
 echo "    ./$VENV_DIR/bin/python main.py"
+echo "    or"
+echo "    ./$VENV_DIR/bin/python worker.py SHEET_ID"
 echo ""
