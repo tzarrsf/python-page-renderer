@@ -7,6 +7,7 @@ from pathlib import Path
 import gspread
 from gspread.exceptions import APIError, SpreadsheetNotFound
 from google.oauth2.service_account import Credentials
+from playwright.sync_api import sync_playwright
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -25,13 +26,25 @@ def get_credentials():
     return Credentials.from_service_account_file(str(creds_path), scopes=SCOPES)
 
 def render_page(url):
-    """Render a page and return the HTML. Update this with your existing page-renderer logic."""
-    # TODO: Import and call your existing page-renderer logic
-    # This is a placeholder that returns a mock response
-    return {
-        "html": "<html><body>Rendered content for: " + url + "</body></html>",
-        "status": "success"
-    }
+    """Render a page using Playwright and return the HTML."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                page.goto(url, wait_until='networkidle')
+                html = page.content()
+                browser.close()
+                return {
+                    "html": html,
+                    "url": url,
+                    "status": "success"
+                }
+            except Exception as e:
+                browser.close()
+                raise Exception(f"Failed to render page: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Browser error: {str(e)}")
 
 def main(sheet_id):
     try:

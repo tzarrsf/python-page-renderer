@@ -1,6 +1,6 @@
-# Page Renderer
+# Python Page Renderer
 
-A simple Flask service that uses Playwright to fetch and render HTML from URLs, exposing a REST endpoint for external clients that can call into localhost, or alternatively by using a job queue. The design is a simple one-string-in, one-string-out approach. A URL is provided and the rendered HTML is sent back
+A simple Flask service that uses Playwright to fetch and render HTML from URLs, exposing a REST endpoint for external clients that can call into localhost, or alternatively by using a job queue. The design is a simple one-string-in, one-string-out approach. A URL is provided and the rendered HTML is sent back.
 
 ## Python Version
 
