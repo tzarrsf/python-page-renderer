@@ -114,13 +114,14 @@ def convert_js_regex_to_python(js_regex):
     # Otherwise treat as plain pattern
     return js_regex, re_module.DOTALL
 
-def render_page(url, extract_type=None):
+def render_page(url, extract_type=None, debug=False):
     """Render a page using Playwright and extract relevant content.
 
     Args:
         url: The URL to render
         extract_type: Optional extraction type. If None or empty, extracts title from Salesforce Help articles.
                      Can be a JavaScript regex like /<pattern>/flags or just the pattern.
+        debug: If True, dump rendered HTML to html_dumps folder
 
     Returns:
         Extracted content based on extract_type
@@ -134,6 +135,9 @@ def render_page(url, extract_type=None):
                 page.goto(url, wait_until='networkidle', timeout=30000)
                 html = page.content()
                 browser.close()
+
+                if debug:
+                    dump_html(url, html)
 
                 # Default: extract title for Salesforce Help articles
                 if not extract_type:
@@ -164,7 +168,30 @@ def find_header_column(headers, expected_header):
             return i
     return -1
 
-def main(sheet_id):
+def dump_html(url, html):
+    """Write rendered HTML to html_dumps folder with sanitized URL as filename."""
+    import re
+    dump_dir = Path("html_dumps")
+    dump_dir.mkdir(exist_ok=True)
+
+    # Sanitize URL for use as filename
+    sanitized = re.sub(r'[^\w\-._~]', '_', url)[:200]
+    filepath = dump_dir / f"{sanitized}.html"
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(html)
+    print(f"💾 HTML dump saved to {filepath}")
+
+def main(sheet_id, debug=False):
+    COLUMNS = [
+        'id',
+        'status',
+        'input',
+        'pattern',
+        'output',
+        'timestamp',
+    ]
+
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
@@ -186,7 +213,7 @@ def main(sheet_id):
         else:
             raise
 
-    print(f"✅ Worker started, polling sheet {sheet_id}")
+    print(f"🔄️ Worker started, polling sheet {sheet_id}")
 
     while True:
         try:
@@ -196,17 +223,22 @@ def main(sheet_id):
                 continue
 
             headers = rows[0]
-            id_col = find_header_column(headers, 'id')
-            status_col = find_header_column(headers, 'status')
-            input_col = find_header_column(headers, 'input')
-            pattern_col = find_header_column(headers, 'pattern')
-            output_col = find_header_column(headers, 'output')
-            timestamp_col = find_header_column(headers, 'timestamp')
+            col_positions = {name: find_header_column(headers, name) for name in COLUMNS}
 
-            if id_col == -1 or status_col == -1 or input_col == -1 or output_col == -1:
-                print("❌ Required columns not found in Jobs sheet. Expected: id, status, input, output")
+            missing = [name for name in COLUMNS if col_positions[name] == -1]
+            if missing:
+                expected = ', '.join(COLUMNS)
+                missing_str = ', '.join(missing)
+                print(f"❌ Required columns not found in Jobs sheet. Expected: {expected}. Missing: {missing_str}")
                 time.sleep(5)
                 continue
+
+            id_col = col_positions['id']
+            status_col = col_positions['status']
+            input_col = col_positions['input']
+            pattern_col = col_positions['pattern']
+            output_col = col_positions['output']
+            timestamp_col = col_positions['timestamp']
 
             for i, r in enumerate(rows[1:], start=2):  # Skip header row
                 if len(r) > status_col and r[status_col] == "pending":
@@ -214,11 +246,11 @@ def main(sheet_id):
                     payload_str = r[input_col] if len(r) > input_col else ""
                     extract_type = r[pattern_col] if pattern_col != -1 and len(r) > pattern_col else None
 
-                    print(f"Processing job {job_id}: URL={payload_str}, pattern={extract_type}")
+                    print(f"🟨 Job {job_id} processing: URL → {payload_str}, pattern → {extract_type}")
                     sh.update_cell(i, status_col + 1, "running")
 
                     try:
-                        result = render_page(payload_str, extract_type)
+                        result = render_page(payload_str, extract_type, debug=debug)
                         sh.update_cell(i, status_col + 1, "done")
 
                         # Prepare update values with output and timestamp
@@ -230,7 +262,7 @@ def main(sheet_id):
                         start_col = output_col + 1
                         end_col = timestamp_col + 1 if timestamp_col != -1 else output_col + 1
                         sh.update(range_name=f"{chr(64 + start_col)}{i}:{chr(64 + end_col)}{i}", values=update_values)
-                        print(f"✅ Job {job_id} completed")
+                        print(f"✅ Job {job_id} completed.")
                     except Exception as e:
                         error_str = str(e)
                         sh.update_cell(i, status_col + 1, "error")
@@ -260,13 +292,29 @@ def main(sheet_id):
             print(f"❌ Worker error: {e}")
             time.sleep(5)
 
+def extract_sheet_id(input_str):
+    """Extract sheet ID from full URL or return as-is if already an ID."""
+    import re
+    # Try to extract from Google Sheets URL
+    match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', input_str)
+    if match:
+        return match.group(1)
+    # Assume it's already the ID
+    return input_str
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python worker.py SHEET_ID")
+        print("Usage: python worker.py SHEET_ID_OR_URL [--debug]")
         print("")
-        print("SHEET_ID: The Google Sheet ID from the URL (long string between /d/ and /edit)")
-        print("Example: python worker.py 1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p")
+        print("SHEET_ID_OR_URL: Either the Google Sheet ID or the full Sheet URL")
+        print("Sheet ID Example: 1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p")
+        print("URL Example: https://docs.google.com/spreadsheets/d/1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p/edit")
+        print("")
+        print("Options:")
+        print("  --debug    Dump rendered HTML to html_dumps/ folder")
         sys.exit(1)
 
-    sheet_id = sys.argv[1]
-    main(sheet_id)
+    sheet_input = sys.argv[1]
+    debug = "--debug" in sys.argv
+    sheet_id = extract_sheet_id(sheet_input)
+    main(sheet_id, debug=debug)
