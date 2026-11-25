@@ -217,21 +217,33 @@ Continuously polls a Google Sheet for rendering jobs (rows with status "pending"
 
 ### Running
 
-Replace `YOUR_SHEET_ID` with the ID from your Google Sheet URL (the long string between `/d/` and `/edit`).
+You can pass either the Sheet ID or the full Google Sheets URL.
 
 **Windows:**
 ```bash
-.venv\Scripts\python worker.py YOUR_SHEET_ID
+.venv\Scripts\python worker.py YOUR_SHEET_ID [--debug]
 ```
 
 **macOS / Linux:**
 ```bash
-.venv/bin/python worker.py YOUR_SHEET_ID
+.venv/bin/python worker.py YOUR_SHEET_ID [--debug]
 ```
 
-**Example:**
+**Examples:**
+
+Using Sheet ID:
 ```bash
 .venv\Scripts\python worker.py 1H-a6BGoKKrwUi5stro7pusYa9SrqziTEAvOZFsR4y5g
+```
+
+Using full URL:
+```bash
+.venv\Scripts\python worker.py https://docs.google.com/spreadsheets/d/1H-a6BGoKKrwUi5stro7pusYa9SrqziTEAvOZFsR4y5g/edit
+```
+
+Using debug mode (saves rendered HTML to `html_dumps/` folder):
+```bash
+.venv\Scripts\python worker.py YOUR_SHEET_ID --debug
 ```
 
 The worker will start polling the Sheet immediately. Press `Ctrl+C` to stop it.
@@ -292,17 +304,17 @@ This service communicates with Google Apps Script via a Google Sheet job queue. 
 4. In the `Jobs` tab, add a header row with these columns:
    - Column A: `id` — Unique job identifier
    - Column B: `status` — Job status (pending, running, done, error)
-   - Column C: `payload` — The URL to render
-   - Column D: `extract_type` — Optional extraction type (see below)
-   - Column E: `result` — The extracted result (never the full HTML)
+   - Column C: `input` — The URL to render
+   - Column D: `pattern` — Optional regex pattern for content extraction
+   - Column E: `output` — The extracted result (never the full HTML)
    - Column F: `timestamp` — When the job was processed
 
-**Extract Types (Column D):**
-- Leave empty or omit: Returns full rendered HTML
-- `title-metadata`: Extracts only title-related HTML snippets (title tag, meta tags, article-title h1, JSON-LD) — useful for title extraction
-- Custom regex pattern: Returns content matching the regex
+**Pattern Examples (Column D):**
+- Leave empty: Extracts title from the page (default for Salesforce Help articles)
+- JavaScript regex like `/pattern/flags` (e.g., `/<h1>(.*?)<\/h1>/i`): Extracts matching content
+- Plain regex pattern: `title="([^"]*)"` extracts title attribute values
 
-**Important:** Always keep results under 50,000 characters. Use extraction types to avoid storing full HTML.
+**Important:** Always keep results under 50,000 characters. Use extraction patterns to avoid storing full HTML.
 
 5. Keep the Sheet open for now (don't share yet)
 
@@ -367,9 +379,9 @@ This service communicates with Google Apps Script via a Google Sheet job queue. 
 
 Before running the worker, verify:
 - [ ] `gspread_service_account.json` exists in the project root
-- [ ] The Google Sheet has a "Jobs" tab with headers: id, status, payload, extract_type, result, timestamp
+- [ ] The Google Sheet has a "Jobs" tab with headers: id, status, input, pattern, output, timestamp
 - [ ] The Sheet is shared with the service account email
-- [ ] You have the Sheet ID (the long string between `/d/` and `/edit` in the URL)
+- [ ] You have either the Sheet ID or the full URL
 
 ### Step 5: Run the Worker
 
@@ -379,42 +391,46 @@ First, install dependencies:
 INSTALL.bat
 ```
 
-Then run the worker with your Sheet ID:
+Then run the worker with your Sheet ID or URL:
 
-```bash
-.venv\Scripts\python worker.py YOUR_SHEET_ID
-```
-
-Replace `YOUR_SHEET_ID` with the ID from your Sheet URL.
-
-**Example:**
+**Using Sheet ID:**
 ```bash
 .venv\Scripts\python worker.py 1H-a6BGoKKrwUi5stro7pusYa9SrqziTEAvOZFsR4y5g
+```
+
+**Using full URL:**
+```bash
+.venv\Scripts\python worker.py https://docs.google.com/spreadsheets/d/1H-a6BGoKKrwUi5stro7pusYa9SrqziTEAvOZFsR4y5g/edit
+```
+
+**Using debug mode (saves HTML to html_dumps/):**
+```bash
+.venv\Scripts\python worker.py YOUR_SHEET_ID --debug
 ```
 
 **Job Processing:**
 - The worker polls the Sheet every 5 seconds for rows with status "pending"
 - For each pending job:
-  1. Reads the URL from column C (payload)
-  2. Reads the extraction type from column D (extract_type)
+  1. Reads the URL from column C (input)
+  2. Reads the regex pattern from column D (pattern)
   3. Renders the page using Playwright
-  4. Extracts content based on the extraction type (or returns full HTML if extract_type is empty)
-  5. Writes the result to column E
+  4. Extracts content using the pattern (or extracts title if pattern is empty)
+  5. Writes the result to column E (output)
   6. Updates status to "done" or "error" in column B
   7. Records the timestamp in column F
 - Press `Ctrl+C` to stop the worker at any time
 
 **Examples:**
 
-Adding a job to extract title metadata from a Salesforce Help article:
-| id | status | payload | extract_type | result | timestamp |
+Extracting title from a Salesforce Help article (no pattern needed):
+| id | status | input | pattern | output | timestamp |
 |-|-|-|-|-|-|
-| abc-123 | pending | https://help.salesforce.com/s/articleView?id=005388918&type=1 | title-metadata | | |
+| abc-123 | pending | https://help.salesforce.com/s/articleView?id=005388918&type=1 | | | |
 
-Adding a job with custom regex to extract prices:
-| id | status | payload | extract_type | result | timestamp |
+Extracting with a regex pattern:
+| id | status | input | pattern | output | timestamp |
 |-|-|-|-|-|-|
-| xyz-789 | pending | https://example.com/product | price:\s*[\$]?([\d,]+\.?\d*) | | |
+| xyz-789 | pending | https://example.com/product | /price:\s*\$?([\d,]+\.?\d*)/i | | |
 
 ### Error Handling
 
